@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Audio Visualizer</title>
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --accent-color: #6366f1;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, var(--accent-color), #8b5cf6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+        }
+
+        .visualizer-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: var(--secondary-bg);
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        #visualizer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            margin-top: 2rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .upload-area {
+            background: var(--secondary-bg);
+            border: 2px dashed var(--accent-color);
+            border-radius: 1rem;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover, .upload-area.drag-over {
+            background: rgba(99, 102, 241, 0.1);
+            border-color: #818cf8;
+        }
+
+        .upload-area p {
+            color: var(--text-secondary);
+            margin-top: 1rem;
+        }
+
+        .button {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .status {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .status.show {
+            opacity: 1;
+        }
+
+        .status.success {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success-color);
+        }
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error-color);
+        }
+
+        .visualization-options {
+            margin-top: 2rem;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .option-button {
+            background: var(--secondary-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--accent-color);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .option-button.active {
+            background: var(--accent-color);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .visualizer-container {
+                aspect-ratio: 4/3;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Enhanced Audio Visualizer</h1>
+            <p>Upload audio files or drop them here to visualize</p>
+        </header>
+
+        <div class="visualizer-container">
+            <canvas id="visualizer"></canvas>
+        </div>
+
+        <div class="visualization-options">
+            <button class="option-button active" data-type="bars">Bars</button>
+            <button class="option-button" data-type="wave">Wave</button>
+            <button class="option-button" data-type="circular">Circular</button>
+        </div>
+
+        <div class="controls">
+            <div class="upload-area" id="dropZone">
+                <button class="button">Select Audio File</button>
+                <p>or drag and drop files here</p>
+            </div>
+        </div>
+
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        class AudioVisualizer {
+            constructor() {
+                this.setupCanvas();
+                this.setupAudioContext();
+                this.setupEventListeners();
+                this.currentVisualization = 'bars';
+                this.isPlaying = false;
+                this.supportedFormats = {
+                    'audio/mpeg': true,      // .mp3
+                    'audio/wav': true,       // .wav
+                    'audio/ogg': true,       // .ogg
+                    'audio/aac': true,       // .aac
+                    'audio/flac': true,      // .flac
+                    'audio/m4a': true,       // .m4a
+                    'audio/webm': true,      // .webm audio
+                    'video/mp4': true,       // .mp4
+                    'video/webm': true       // .webm video
+                };
+                
+                // Visualization settings
+                this.settings = {
+                    bars: {
+                        barWidth: 2,
+                        barSpacing: 1,
+                        smoothingTimeConstant: 0.85,
+                        fftSize: 16384,
+                        minDecibels: -85,
+                        maxDecibels: -10,
+                        frequencyBinCount: 8192,
+                        minHeight: 2,
+                        responsiveScaling: true
+                    },
+                    wave: {
+                        smoothingTimeConstant: 0.5,
+                        fftSize: 4096,
+                        lineWidth: 2,
+                        responsiveScaling: true
+                    },
+                    circular: {
+                        smoothingTimeConstant: 0.8,
+                        fftSize: 8192,
+                        detail: 256,
+                        responsiveScaling: true,
+                        minRadius: 50,
+                        maxRadius: 300
+                    }
+                };
+            }
+
+            setupCanvas() {
+                this.canvas = document.getElementById('visualizer');
+                this.ctx = this.canvas.getContext('2d', {
+                    alpha: false,
+                    desynchronized: true,
+                    willReadFrequently: false
+                });
+                this.resizeCanvas();
+                
+             // Debounced resize handler
+             let resizeTimeout;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => this.resizeCanvas(), 250);
+                });
+            }
+
+            setupAudioContext() {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.analyser = this.audioContext.createAnalyser();
+                this.source = null;
+            }
+
+            setupEventListeners() {
+                const dropZone = document.getElementById('dropZone');
+                const fileButton = dropZone.querySelector('.button');
+                
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('drag-over');
+                });
+
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('drag-over');
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('drag-over');
+                    this.handleFiles(e.dataTransfer.files);
+                });
+
+                fileButton.addEventListener('click', () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'audio/*';
+                    input.onchange = (e) => this.handleFiles(e.target.files);
+                    input.click();
+                });
+
+                document.querySelectorAll('.option-button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        document.querySelector('.option-button.active').classList.remove('active');
+                        button.classList.add('active');
+                        this.currentVisualization = button.dataset.type;
+                    });
+                });
+            }
+
+            
+            resizeCanvas() {
+                const container = this.canvas.parentElement;
+                const rect = container.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                
+                // Set canvas size maintaining aspect ratio
+                this.canvas.width = rect.width * dpr;
+                this.canvas.height = rect.height * dpr;
+                
+                // Scale context
+                this.ctx.scale(dpr, dpr);
+                
+                // Update visualization parameters based on new size
+                this.updateVisualizationParameters();
+            }
+
+            updateVisualizationParameters() {
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                
+                // Update bars visualization
+                this.settings.bars.barWidth = Math.max(1, width / 1000);
+                this.settings.bars.barSpacing = Math.max(0.5, width / 2000);
+                
+                // Update circular visualization
+                this.settings.circular.radius = Math.min(
+                    this.settings.circular.maxRadius,
+                    Math.max(this.settings.circular.minRadius, 
+                        Math.min(width, height) * 0.25
+                    )
+                );
+            }
+
+            async handleFiles(files) {
+                if (!files.length) return;
+
+                try {
+                    const file = files[0];
+                    
+                    // Check file format support
+                    if (!this.isFormatSupported(file)) {
+                        throw new Error('Unsupported file format');
+                    }
+
+                    // Create object URL for better memory management
+                    const objectUrl = URL.createObjectURL(file);
+                    
+                    try {
+                        // Load audio
+                        if (this.source) {
+                            this.source.stop();
+                            this.source.disconnect();
+                        }
+
+                        const arrayBuffer = await file.arrayBuffer();
+                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+                    this.source = this.audioContext.createBufferSource();
+                    this.source.buffer = audioBuffer;
+                    
+                        // Configure analyser
+                        this.configureAnalyser();
+                    
+                        // Connect nodes
+                    this.source.connect(this.analyser);
+                    this.analyser.connect(this.audioContext.destination);
+                    
+                        // Start playback
+                    this.source.start(0);
+                        this.isPlaying = true;
+                        
+                    this.showStatus(`Playing: ${file.name}`, 'success');
+                    this.startVisualization();
+                        
+                        // Handle playback completion
+                        this.source.onended = () => {
+                            this.isPlaying = false;
+                            this.showStatus('Playback completed', 'success');
+                        };
+                    } finally {
+                        // Clean up object URL
+                        URL.revokeObjectURL(objectUrl);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    this.showStatus(
+                        `Error: ${error.message || 'Failed to load audio'}`, 
+                        'error'
+                    );
+                }
+            }
+
+            isFormatSupported(file) {
+                const type = file.type.toLowerCase();
+                return this.supportedFormats[type] || 
+                    Object.keys(this.supportedFormats).some(format => 
+                        file.name.toLowerCase().endsWith(format.split('/')[1])
+                    );
+            }
+
+            configureAnalyser() {
+                const settings = this.settings[this.currentVisualization];
+                this.analyser = this.audioContext.createAnalyser();
+                
+                // Apply base settings
+                Object.assign(this.analyser, {
+                    smoothingTimeConstant: settings.smoothingTimeConstant,
+                    fftSize: settings.fftSize,
+                    minDecibels: settings.minDecibels || -90,
+                    maxDecibels: settings.maxDecibels || -10
+                });
+                
+                // Create required buffers
+                this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+                this.timeData = new Uint8Array(this.analyser.frequencyBinCount);
+            }
+
+            // Enhanced visualization methods
+            drawBars() {
+                const width = this.canvas.width / window.devicePixelRatio;
+                const height = this.canvas.height / window.devicePixelRatio;
+                const settings = this.settings.bars;
+                
+                this.analyser.getByteFrequencyData(this.frequencyData);
+                
+                // Calculate bar dimensions
+                const totalBars = Math.min(
+                    this.frequencyData.length,
+                    Math.floor(width / (settings.barWidth + settings.barSpacing))
+                );
+                
+                // Create gradient
+                const gradient = this.ctx.createLinearGradient(0, height, 0, 0);
+                gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+                gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.8)');
+                gradient.addColorStop(1, 'rgba(99, 102, 241, 1)');
+                this.ctx.fillStyle = gradient;
+                
+                // Clear previous frame
+                this.ctx.clearRect(0, 0, width, height);
+                
+                // Draw bars with improved frequency distribution
+                for (let i = 0; i < totalBars; i++) {
+                    const percent = i / totalBars;
+                    
+                    // Use logarithmic scaling for frequency distribution
+                    const index = Math.floor(
+                        (1 - Math.exp(-4 * percent)) * this.frequencyData.length
+                    );
+                    
+                    const value = this.frequencyData[index];
+                    const percentHeight = value / 255;
+                    
+                    // Apply frequency weighting and scaling
+                    const scaleFactor = 1 + (index / this.frequencyData.length) * 0.5;
+                    let barHeight = percentHeight * height * scaleFactor;
+                    
+                    // Add subtle animation
+                    const time = Date.now() * 0.001;
+                    const variation = Math.sin(time + i * 0.1) * 2;
+                    barHeight = Math.max(settings.minHeight, barHeight + variation);
+                    
+                    const x = i * (settings.barWidth + settings.barSpacing);
+                    const y = height - barHeight;
+                    
+                    // Draw bar with glow effect
+                    this.ctx.shadowBlur = 15;
+                    this.ctx.shadowColor = `rgba(99, 102, 241, ${percentHeight * 0.5})`;
+                    this.ctx.fillRect(x, y, settings.barWidth, barHeight);
+                }
+                
+                // Reset shadow
+                this.ctx.shadowBlur = 0;
+            }
+
+            drawWave() {
+                const bufferLength = this.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                this.analyser.getByteTimeDomainData(dataArray);
+
+                const width = this.canvas.width / window.devicePixelRatio;
+                const height = this.canvas.height / window.devicePixelRatio;
+                const settings = this.settings.wave;
+
+                this.ctx.lineWidth = settings.lineWidth;
+                this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)';
+                this.ctx.beginPath();
+
+                const sliceWidth = width / bufferLength;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * height / 2;
+
+                    if (i === 0) {
+                        this.ctx.moveTo(x, y);
+                    } else {
+                        this.ctx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth;
+                }
+
+                this.ctx.lineTo(width, height / 2);
+                this.ctx.stroke();
+            }
+
+            drawCircular() {
+                const bufferLength = this.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                this.analyser.getByteFrequencyData(dataArray);
+
+                const width = this.canvas.width / window.devicePixelRatio;
+                const height = this.canvas.height / window.devicePixelRatio;
+                const centerX = width / 2;
+                const centerY = height / 2;
+                const radius = Math.min(width, height) * 0.3;
+                const settings = this.settings.circular;
+
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)';
+                this.ctx.lineWidth = 2;
+
+                for (let i = 0; i < settings.detail; i++) {
+                    const percent = i / settings.detail;
+                    const index = Math.floor(percent * bufferLength);
+                    const value = dataArray[index];
+                const angle = percent * Math.PI * 2;
+                    const amplitude = (value / 255) * (radius * 0.5);
+                    
+                const x = centerX + Math.cos(angle) * (radius + amplitude);
+                const y = centerY + Math.sin(angle) * (radius + amplitude);
+                
+                if (i === 0) {
+                    this.ctx.moveTo(x, y);
+                } else {
+                    this.ctx.lineTo(x, y);
+                }
+            }
+            
+            const gradient = this.ctx.createLinearGradient(0, 0, width, height);
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.8)');
+            gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.8)');
+            gradient.addColorStop(1, 'rgba(99, 102, 241, 0.8)');
+            
+            this.ctx.strokeStyle = gradient;
+            this.ctx.lineWidth = 2;
+            this.ctx.closePath();
+            this.ctx.stroke();
+            
+            // Add glow effect
+            this.ctx.shadowBlur = 20;
+            this.ctx.shadowColor = 'rgba(99, 102, 241, 0.5)';
+        }
+    }
+
+    class MediaRecorder {
+        constructor() {
+            this.mediaRecorder = null;
+            this.recordedChunks = [];
+            this.isRecording = false;
+            this.stream = null;
+            this.setupUI();
+        }
+
+        setupUI() {
+            const controls = document.querySelector('.controls');
+            
+            // Add recording controls
+            const recordingControls = document.createElement('div');
+            recordingControls.className = 'recording-controls';
+            recordingControls.innerHTML = `
+                <button class="button" id="recordAudio">Record Audio</button>
+                <button class="button" id="recordVideo">Record Video</button>
+                <button class="button" id="stopRecording" style="display: none">Stop Recording</button>
+                <div class="record-timer" style="display: none">00:00</div>
+            `;
+            
+            controls.appendChild(recordingControls);
+
+            // Add event listeners
+            document.getElementById('recordAudio').addEventListener('click', () => this.startRecording('audio'));
+            document.getElementById('recordVideo').addEventListener('click', () => this.startRecording('video'));
+            document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
+        }
+
+        async startRecording(mediaType) {
+            try {
+                const constraints = {
+                    audio: true,
+                    video: mediaType === 'video' ? {
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    } : false
+                };
+
+                this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+                this.recordedChunks = [];
+                
+                const options = {
+                    mimeType: mediaType === 'video' ? 'video/webm' : 'audio/webm'
+                };
+
+                this.mediaRecorder = new window.MediaRecorder(this.stream, options);
+                
+                this.mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        this.recordedChunks.push(event.data);
+                    }
+                };
+
+                this.mediaRecorder.onstop = () => this.processRecording(mediaType);
+
+                // Update UI
+                document.getElementById('recordAudio').style.display = 'none';
+                document.getElementById('recordVideo').style.display = 'none';
+                document.getElementById('stopRecording').style.display = 'block';
+                
+                // Start timer
+                this.startTimer();
+
+                this.mediaRecorder.start();
+                this.isRecording = true;
+                
+                // Connect to audio context for visualization
+                const audioVisualizer = new AudioVisualizer();
+                const audioContext = audioVisualizer.audioContext;
+                const source = audioContext.createMediaStreamSource(this.stream);
+                source.connect(audioVisualizer.analyser);
+                audioVisualizer.startVisualization();
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                this.showStatus('Error starting recording: ' + error.message, 'error');
+            }
+        }
+
+        startTimer() {
+            const timerElement = document.querySelector('.record-timer');
+            timerElement.style.display = 'block';
+            
+            let seconds = 0;
+            this.timer = setInterval(() => {
+                seconds++;
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        stopRecording() {
+            if (this.mediaRecorder && this.isRecording) {
+                this.mediaRecorder.stop();
+                this.stream.getTracks().forEach(track => track.stop());
+                clearInterval(this.timer);
+                
+                // Reset UI
+                document.getElementById('recordAudio').style.display = 'block';
+                document.getElementById('recordVideo').style.display = 'block';
+                document.getElementById('stopRecording').style.display = 'none';
+                document.querySelector('.record-timer').style.display = 'none';
+                
+                this.isRecording = false;
+            }
+        }
+
+        processRecording(mediaType) {
+            const blob = new Blob(this.recordedChunks, {
+                type: mediaType === 'video' ? 'video/webm' : 'audio/webm'
+            });
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recording-${Date.now()}.webm`;
+            a.click();
+            
+            // Clean up
+            URL.revokeObjectURL(url);
+            this.recordedChunks = [];
+            this.showStatus('Recording saved successfully', 'success');
+        }
+
+        showStatus(message, type = 'success') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status show ${type}`;
+            setTimeout(() => status.classList.remove('show'), 3000);
+        }
+    }
+
+    // Initialize both classes
+    const visualizer = new AudioVisualizer();
+    const recorder = new MediaRecorder();
+</script>
+</body>
+</html>

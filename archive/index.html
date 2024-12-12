@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Audio Visualizer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: system-ui;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: white;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #dropZone {
+            border: 2px dashed #666;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            background: #2a2a2a;
+        }
+        canvas {
+            width: 100%;
+            height: 400px;
+            background: #000;
+            border-radius: 8px;
+        }
+        #fileInput {
+            display: none;
+        }
+        button {
+            background: #4CAF50;
+            border: none;
+            padding: 12px 24px; /* Larger touch target */
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #status {
+            color: #4CAF50;
+            margin: 10px 0;
+        }
+        .error {
+            color: #ff4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>3D Audio Visualizer</h1>
+        <div id="status"></div>
+        <div id="dropZone">
+            <button onclick="requestFiles()">Select WAV Files</button>
+            <p>Supported format: .wav</p>
+        </div>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const statusElement = document.getElementById('status');
+        let analyser;
+
+        // Enhanced file request function
+        function requestFiles() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.wav,audio/wav,audio/wave,audio/x-wav';
+            input.multiple = true;
+            
+            // Add capture attribute for mobile
+            input.capture = 'filesystem';
+            
+            input.onchange = (e) => {
+                handleFiles(e.target.files);
+            };
+            
+            input.click();
+        }
+
+        // Set up drag and drop with error handling
+        const dropZone = document.getElementById('dropZone');
+        
+        dropZone.ondragover = (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#4CAF50';
+        };
+        
+        dropZone.ondragleave = () => {
+            dropZone.style.borderColor = '#666';
+        };
+        
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#666';
+            handleFiles(e.dataTransfer.files);
+        };
+
+        function handleFiles(files) {
+            if (files.length === 0) {
+                showStatus('No files selected', true);
+                return;
+            }
+
+            Array.from(files).forEach(file => {
+                if (!file.type.includes('wav') && !file.name.toLowerCase().endsWith('.wav')) {
+                    showStatus(`File ${file.name} is not a WAV file`, true);
+                    return;
+                }
+
+                showStatus(`Loading ${file.name}...`);
+                
+                const reader = new FileReader();
+                
+                reader.onload = async (e) => {
+                    try {
+                        const audioData = await audioContext.decodeAudioData(e.target.result);
+                        setupAudioAnalyser(audioData);
+                        showStatus(`Successfully loaded ${file.name}`);
+                    } catch (error) {
+                        showStatus(`Error loading ${file.name}: ${error.message}`, true);
+                    }
+                };
+                
+                reader.onerror = () => {
+                    showStatus(`Error reading ${file.name}`, true);
+                };
+                
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function showStatus(message, isError = false) {
+            statusElement.textContent = message;
+            statusElement.className = isError ? 'error' : '';
+        }
+
+        function setupAudioAnalyser(audioBuffer) {
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+            
+            source.start(0);
+            animate();
+        }
+
+        function animate() {
+            if (!analyser) return;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const barWidth = canvas.width / bufferLength * 2;
+            let x = 0;
+            
+            for (let i = 0; i < bufferLength; i++) {
+                const barHeight = dataArray[i] * 1.5;
+                
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                gradient.addColorStop(0, `hsl(${i / bufferLength * 360}, 100%, 50%)`);
+                gradient.addColorStop(1, `hsl(${i / bufferLength * 360}, 100%, 20%)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                
+                x += barWidth;
+            }
+            
+            requestAnimationFrame(animate);
+        }
+
+        // Handle canvas resize
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+        }
+        
+        window.onresize = resizeCanvas;
+        resizeCanvas();
+
+        // Resume AudioContext on user interaction
+        document.addEventListener('click', () => {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        });
+    </script>
+</body>
+</html>

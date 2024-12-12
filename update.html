@@ -1,0 +1,249 @@
+        // Updates to AudioVisualizer class
+        class AudioVisualizer {
+            constructor() {
+                this.setupCanvas();
+                this.setupAudioContext();
+                this.setupEventListeners();
+                this.currentVisualization = 'bars';
+                this.isPlaying = false;
+                this.supportedFormats = {
+                    'audio/mpeg': true,      // .mp3
+                    'audio/wav': true,       // .wav
+                    'audio/ogg': true,       // .ogg
+                    'audio/aac': true,       // .aac
+                    'audio/flac': true,      // .flac
+                    'audio/m4a': true,       // .m4a
+                    'audio/webm': true,      // .webm audio
+                    'video/mp4': true,       // .mp4
+                    'video/webm': true       // .webm video
+                };
+                
+                // Enhanced visualization settings
+                this.settings = {
+                    bars: {
+                        barWidth: 2,
+                        barSpacing: 1,
+                        smoothingTimeConstant: 0.85,
+                        fftSize: 16384,
+                        minDecibels: -85,
+                        maxDecibels: -10,
+                        frequencyBinCount: 8192,
+                        minHeight: 2,
+                        responsiveScaling: true
+                    },
+                    wave: {
+                        smoothingTimeConstant: 0.5,
+                        fftSize: 4096,
+                        lineWidth: 2,
+                        responsiveScaling: true
+                    },
+                    circular: {
+                        smoothingTimeConstant: 0.8,
+                        fftSize: 8192,
+                        detail: 256,
+                        responsiveScaling: true,
+                        minRadius: 50,
+                        maxRadius: 300
+                    }
+                };
+            }
+
+            setupCanvas() {
+                this.canvas = document.getElementById('visualizer');
+                this.ctx = this.canvas.getContext('2d', {
+                    alpha: false,
+                    desynchronized: true,
+                    willReadFrequently: false
+                });
+                this.resizeCanvas();
+                
+                // Debounced resize handler
+                let resizeTimeout;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => this.resizeCanvas(), 250);
+                });
+            }
+
+            resizeCanvas() {
+                const container = this.canvas.parentElement;
+                const rect = container.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                
+                // Set canvas size maintaining aspect ratio
+                this.canvas.width = rect.width * dpr;
+                this.canvas.height = rect.height * dpr;
+                
+                // Scale context
+                this.ctx.scale(dpr, dpr);
+                
+                // Update visualization parameters based on new size
+                this.updateVisualizationParameters();
+            }
+
+            updateVisualizationParameters() {
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                
+                // Update bars visualization
+                this.settings.bars.barWidth = Math.max(1, width / 1000);
+                this.settings.bars.barSpacing = Math.max(0.5, width / 2000);
+                
+                // Update circular visualization
+                this.settings.circular.radius = Math.min(
+                    this.settings.circular.maxRadius,
+                    Math.max(this.settings.circular.minRadius, 
+                        Math.min(width, height) * 0.25
+                    )
+                );
+            }
+
+            async handleFiles(files) {
+                if (!files.length) return;
+
+                try {
+                    const file = files[0];
+                    
+                    // Check file format support
+                    if (!this.isFormatSupported(file)) {
+                        throw new Error('Unsupported file format');
+                    }
+
+                    // Create object URL for better memory management
+                    const objectUrl = URL.createObjectURL(file);
+                    
+                    try {
+                        // Load audio
+                        if (this.source) {
+                            this.source.stop();
+                            this.source.disconnect();
+                        }
+
+                        const arrayBuffer = await file.arrayBuffer();
+                        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                        
+                        this.source = this.audioContext.createBufferSource();
+                        this.source.buffer = audioBuffer;
+                        
+                        // Configure analyser
+                        this.configureAnalyser();
+                        
+                        // Connect nodes
+                        this.source.connect(this.analyser);
+                        this.analyser.connect(this.audioContext.destination);
+                        
+                        // Start playback
+                        this.source.start(0);
+                        this.isPlaying = true;
+                        
+                        this.showStatus(`Playing: ${file.name}`, 'success');
+                        this.startVisualization();
+                        
+                        // Handle playback completion
+                        this.source.onended = () => {
+                            this.isPlaying = false;
+                            this.showStatus('Playback completed', 'success');
+                        };
+                    } finally {
+                        // Clean up object URL
+                        URL.revokeObjectURL(objectUrl);
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    this.showStatus(
+                        `Error: ${error.message || 'Failed to load audio'}`, 
+                        'error'
+                    );
+                }
+            }
+
+            isFormatSupported(file) {
+                const type = file.type.toLowerCase();
+                return this.supportedFormats[type] || 
+                    Object.keys(this.supportedFormats).some(format => 
+                        file.name.toLowerCase().endsWith(format.split('/')[1])
+                    );
+            }
+
+            configureAnalyser() {
+                const settings = this.settings[this.currentVisualization];
+                this.analyser = this.audioContext.createAnalyser();
+                
+                // Apply base settings
+                Object.assign(this.analyser, {
+                    smoothingTimeConstant: settings.smoothingTimeConstant,
+                    fftSize: settings.fftSize,
+                    minDecibels: settings.minDecibels || -90,
+                    maxDecibels: settings.maxDecibels || -10
+                });
+                
+                // Create required buffers
+                this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+                this.timeData = new Uint8Array(this.analyser.frequencyBinCount);
+            }
+
+            // Enhanced visualization methods
+            drawBars() {
+                const width = this.canvas.width / window.devicePixelRatio;
+                const height = this.canvas.height / window.devicePixelRatio;
+                const settings = this.settings.bars;
+                
+                this.analyser.getByteFrequencyData(this.frequencyData);
+                
+                // Calculate bar dimensions
+                const totalBars = Math.min(
+                    this.frequencyData.length,
+                    Math.floor(width / (settings.barWidth + settings.barSpacing))
+                );
+                
+                // Create gradient based on canvas size
+                const gradient = this.ctx.createLinearGradient(0, height, 0, 0);
+                gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+                gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.8)');
+                gradient.addColorStop(1, 'rgba(99, 102, 241, 1)');
+                this.ctx.fillStyle = gradient;
+
+                // Clear previous frame
+                this.ctx.clearRect(0, 0, width, height);
+                
+                // Draw bars with improved frequency distribution
+                for (let i = 0; i < totalBars; i++) {
+                    const percent = i / totalBars;
+                    
+                    // Use logarithmic scaling for frequency distribution
+                    const index = Math.floor(
+                        (1 - Math.exp(-4 * percent)) * this.frequencyData.length
+                    );
+                    
+                    const value = this.frequencyData[index];
+                    const percentHeight = value / 255;
+                    
+                    // Apply frequency weighting and scaling
+                    const scaleFactor = 1 + (index / this.frequencyData.length) * 0.5;
+                    let barHeight = percentHeight * height * scaleFactor;
+                    
+                    // Add subtle animation
+                    const time = Date.now() * 0.001;
+                    const variation = Math.sin(time + i * 0.1) * 2;
+                    barHeight = Math.max(settings.minHeight, barHeight + variation);
+                    
+                    const x = i * (settings.barWidth + settings.barSpacing);
+                    const y = height - barHeight;
+                    
+                    // Draw bar with glow effect
+                    this.ctx.shadowBlur = 15;
+                    this.ctx.shadowColor = `rgba(99, 102, 241, ${percentHeight * 0.5})`;
+                    this.ctx.fillRect(x, y, settings.barWidth, barHeight);
+                }
+                
+                // Reset shadow
+                this.ctx.shadowBlur = 0;
+            }
+
+            // Similar improvements for drawWave() and drawCircular() methods...
+        }
+
+        // Update class instantiation
+        document.addEventListener('DOMContentLoaded', () => {
+            const visualizer = new AudioVisualizer();
+        });
